@@ -1,122 +1,72 @@
-# app1.py
-import streamlit as st
+import gradio as gr
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import joblib
+import torch
+from transformers import pipeline
 
-# -------------------------------
-# Load Trained Model
-# -------------------------------
-@st.cache_resource
-def load_model():
-    return joblib.load(r"C:\Users\R.KAVIYA\OneDrive\Desktop\gen ai\model.pkl")
+# Load your trained model (ensure model.pkl is accessible locally)
+model = joblib.load("model.pkl")
 
-model = load_model()
+# Specify exact pre-trained HF model for sentiment-analysis pipeline
+nlp_pipeline = pipeline(
+    "sentiment-analysis",
+    model="distilbert-base-uncased-finetuned-sst-2-english",
+    device=0 if torch.cuda.is_available() else -1  # Use GPU if available
+)
 
-# -------------------------------
-# App Title
-# -------------------------------
-st.title("🩺 Chronic Disease Fitness Chart")
-st.markdown("This app predicts your **chronic disease risk** and shows your fitness position compared to population data.")
-
-# -------------------------------
-# User Inputs (Sidebar)
-# -------------------------------
-st.sidebar.header("Enter Your Health Details:")
-
-age = st.sidebar.slider("Age", 18, 100, 30)
-gender = st.sidebar.selectbox("Gender", ["Male", "Female"])
-bmi = st.sidebar.number_input("BMI", min_value=10.0, max_value=50.0, value=27.0, step=0.1)
-blood_pressure = st.sidebar.number_input("Blood Pressure (mmHg)", min_value=80, max_value=200, value=120)
-cholesterol = st.sidebar.number_input("Cholesterol (mg/dL)", min_value=100, max_value=400, value=200)
-glucose = st.sidebar.number_input("Glucose (mg/dL)", min_value=70, max_value=300, value=100)
-activity = st.sidebar.selectbox("Physical Activity", ["Low", "Moderate", "High"])
-smoking = st.sidebar.selectbox("Smoking Status", ["No", "Yes"])
-alcohol = st.sidebar.selectbox("Alcohol Intake", ["No", "Yes"])
-family_history = st.sidebar.selectbox("Family History of Chronic Disease", ["No", "Yes"])
-
-# Encode Inputs
+# Mapping dictionaries
+gender_map = {"Male": 0, "Female": 1}
 activity_map = {"Low": 0, "Moderate": 1, "High": 2}
 yes_no_map = {"No": 0, "Yes": 1}
-gender_map = {"Male": 0, "Female": 1}
 
-input_data = {
-    "age": age,
-    "gender": gender_map[gender],
-    "bmi": bmi,
-    "blood_pressure": blood_pressure,
-    "cholesterol_level": cholesterol,
-    "glucose_level": glucose,
-    "physical_activity": activity_map[activity],
-    "smoking_status": yes_no_map[smoking],
-    "alcohol_intake": yes_no_map[alcohol],
-    "family_history": yes_no_map[family_history],
-}
+def predict(age, gender, bmi, blood_pressure, cholesterol, glucose,
+            activity, smoking, alcohol, family_history, user_text):
+    # Prepare input data for your ML model
+    input_data = {
+        "age": age,
+        "gender": gender_map[gender],
+        "bmi": bmi,
+        "blood_pressure": blood_pressure,
+        "cholesterol_level": cholesterol,
+        "glucose_level": glucose,
+        "physical_activity": activity_map[activity],
+        "smoking_status": yes_no_map[smoking],
+        "alcohol_intake": yes_no_map[alcohol],
+        "family_history": yes_no_map[family_history],
+    }
+    input_df = pd.DataFrame([input_data])
 
-input_df = pd.DataFrame([input_data])
-
-# -------------------------------
-# Predict Button
-# -------------------------------
-predict_clicked = st.sidebar.button("🔍 Predict Risk")
-
-if predict_clicked:
-    # Prediction
+    # Predict chronic disease risk
     prediction = model.predict(input_df)[0]
-    risk_label = "⚠️ High Risk" if prediction == 1 else "✅ Low Risk"
+    risk_label = "High Risk ⚠️" if prediction == 1 else "Low Risk ✅"
 
-    st.subheader("Predicted Chronic Disease Risk")
-    st.write(f"Based on your inputs: **{risk_label}**")
+    # Analyze sentiment of user input text with specified pipeline
+    nlp_result = nlp_pipeline(user_text)[0]
+    nlp_summary = f"Sentiment: {nlp_result['label']} (confidence {nlp_result['score']:.2f})"
 
-    # -------------------------------
-    # Visualization: Age vs BMI
-    # -------------------------------
-    st.subheader("📊 Your Position on Age vs BMI")
+    return risk_label, nlp_summary
 
-    sample_data = pd.DataFrame({
-        "Age": [20, 25, 30, 35, 40, 45, 50, 60, 70],
-        "BMI": [18, 22, 27, 30, 25, 28, 32, 35, 29]
-    })
+iface = gr.Interface(
+    fn=predict,
+    inputs=[
+        gr.Slider(18, 100, value=30, label="Age"),
+        gr.Radio(["Male", "Female"], label="Gender"),
+        gr.Number(value=27.0, label="BMI"),
+        gr.Number(value=120, label="Blood Pressure (mmHg)"),
+        gr.Number(value=200, label="Cholesterol (mg/dL)"),
+        gr.Number(value=100, label="Glucose (mg/dL)"),
+        gr.Radio(["Low", "Moderate", "High"], label="Physical Activity"),
+        gr.Radio(["No", "Yes"], label="Smoking Status"),
+        gr.Radio(["No", "Yes"], label="Alcohol Intake"),
+        gr.Radio(["No", "Yes"], label="Family History of Chronic Disease"),
+        gr.Textbox(lines=2, placeholder="Enter text for sentiment analysis", label="Input Text (Optional)")
+    ],
+    outputs=["text", "text"],
+    title="Chronic Disease Fitness Chart with Sentiment Analysis",
+    description="Predict your chronic disease risk and analyze text sentiment."
+)
 
-    fig, ax = plt.subplots()
-    sns.scatterplot(data=sample_data, x="Age", y="BMI", color="blue", label="Population", ax=ax)
-    sns.scatterplot(x=[age], y=[bmi], color="red", s=200, label="You", ax=ax)
+if __name__ == "__main__":
+    iface.launch()
 
-    ax.axhspan(18.5, 24.9, color="green", alpha=0.2, label="Healthy BMI")
-    ax.axhspan(25, 29.9, color="yellow", alpha=0.2, label="Overweight")
-    ax.axhspan(30, 50, color="red", alpha=0.1, label="Obese")
 
-    ax.set_title("Age vs BMI Chart")
-    ax.set_xlim(18, 100)
-    ax.set_ylim(10, 50)
-    ax.legend()
-    st.pyplot(fig)
-
-    # -------------------------------
-    # Fitness Recommendations
-    # -------------------------------
-    st.subheader("💡 Personalized Fitness Tips")
-
-    if bmi > 30:
-        st.write("🏃 You are in the **Obese** category. Consider weight management strategies like daily walking and a balanced diet.")
-    elif bmi > 25:
-        st.write("⚖️ You are **Overweight**. Regular exercise and reducing processed food can help lower risk.")
-    else:
-        st.write("✅ Your BMI is in the healthy range. Maintain your lifestyle with regular activity.")
-
-    if cholesterol > 240:
-        st.write("🥗 Your cholesterol is high. Reduce saturated fats and increase fiber intake.")
-    if glucose > 126:
-        st.write("🍎 Your glucose level is high. Monitor sugar intake and consult a doctor for diabetes screening.")
-    if smoking == "Yes":
-        st.write("🚭 Quitting smoking will significantly reduce chronic disease risks.")
-    if alcohol == "Yes":
-        st.write("🍷 Reduce alcohol intake to improve heart and liver health.")
-    if activity == "Low":
-        st.write("🏋️ Increase your physical activity (at least 30 min of brisk walking daily).")
-
-    st.success("🎯 Stay consistent with healthy habits for long-term fitness!")
-
-else:
-    st.info("👈 Enter your details in the sidebar and click **Predict Risk** to see results.")
